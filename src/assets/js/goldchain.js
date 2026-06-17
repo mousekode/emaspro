@@ -36,8 +36,9 @@ class DummyVerifikasiEmasPro {
         this.wallet = wallet;
     }
 
-    daftarkanEmas(serialNumber, batch, ownerName = "Belum Diisi") {
+    daftarkanEmas(serialNumber, batch, ownerName = "Belum Diisi", beratGram = 1, karat = 24) {
         this.requireAuthorized();
+        validateCertificateNumbers(beratGram, karat);
 
         const registry = readRegistry();
         if (registry[serialNumber]?.isRegistered) {
@@ -49,6 +50,8 @@ class DummyVerifikasiEmasPro {
             timestamp: Math.floor(Date.now() / 1000),
             batchProduksi: batch,
             ownerName,
+            beratGram,
+            karat,
             isRevoked: false,
             issuer: this.wallet.address
         };
@@ -107,7 +110,7 @@ class DummyVerifikasiEmasPro {
         const record = readRegistry()[serialNumber];
 
         if (!record?.isRegistered) {
-            return [false, "PALSU / TIDAK TERDAFTAR", "", 0, ""];
+            return [false, "PALSU / TIDAK TERDAFTAR", "", 0, "", 0, 0];
         }
 
         if (record.isRevoked) {
@@ -116,11 +119,21 @@ class DummyVerifikasiEmasPro {
                 "PERINGATAN: KARTU DIBATALKAN / DILAPORKAN HILANG",
                 record.batchProduksi,
                 record.timestamp,
-                record.ownerName || "Belum Diisi"
+                record.ownerName || "Belum Diisi",
+                record.beratGram || 0,
+                record.karat || 0
             ];
         }
 
-        return [true, "VALID & ASLI", record.batchProduksi, record.timestamp, record.ownerName || "Belum Diisi"];
+        return [
+            true,
+            "VALID & ASLI",
+            record.batchProduksi,
+            record.timestamp,
+            record.ownerName || "Belum Diisi",
+            record.beratGram || 0,
+            record.karat || 0
+        ];
     }
 
     addAuthorized(account) {
@@ -331,12 +344,16 @@ async function buatSertifikatEmas() {
     const sn = document.getElementById("addSerial").value.trim();
     const batch = document.getElementById("addBatch").value.trim();
     const owner = document.getElementById("addOwner").value.trim();
+    const beratGram = Number(document.getElementById("addBerat").value);
+    const karat = Number(document.getElementById("addKarat").value);
 
     if (!sn || !batch || !owner) return alert("Mohon lengkapi kolom Serial Number, Batch, dan Nama Pemilik!");
+    if (!isValidPositiveInteger(beratGram)) return alert("Berat gram harus berupa angka bulat lebih dari 0!");
+    if (!isValidKarat(karat)) return alert("Karat harus berupa angka bulat antara 1 sampai 24!");
 
     showToast("Memproses transaksi demo dari dummy wallet...", "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20");
     try {
-        const tx = contract.daftarkanEmas(sn, batch, owner);
+        const tx = contract.daftarkanEmas(sn, batch, owner, beratGram, karat);
         showToast("Menulis data ke registry lokal Remix dummy...", "bg-amber-500/10 text-amber-400 border border-amber-500/20");
         await tx.wait();
         showToast("Sukses! Emas berhasil didaftarkan di registry demo.", "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
@@ -344,6 +361,8 @@ async function buatSertifikatEmas() {
         document.getElementById("addSerial").value = "";
         document.getElementById("addBatch").value = "";
         document.getElementById("addOwner").value = "";
+        document.getElementById("addBerat").value = "";
+        document.getElementById("addKarat").value = "";
     } catch (error) {
         console.error(error);
         showToast(error.message || "Transaksi demo gagal.", "bg-red-500/10 text-red-400 border border-red-500/20");
@@ -363,6 +382,8 @@ async function cekKeaslianEmas() {
         const batch = res[2];
         const waktuDaftar = res[3];
         const ownerName = res[4];
+        const beratGram = res[5];
+        const karat = res[6];
 
         document.getElementById("placeholderView").classList.add("hidden");
         document.getElementById("certificateSheet").classList.remove("hidden");
@@ -371,6 +392,8 @@ async function cekKeaslianEmas() {
         document.getElementById("certStatusMsg").innerText = pesanStatus;
         document.getElementById("certBatch").innerText = terdaftar ? batch : "N/A";
         document.getElementById("certOwner").innerText = terdaftar ? ownerName : "N/A";
+        document.getElementById("certBerat").innerText = terdaftar && beratGram > 0 ? `${beratGram} gram` : "N/A";
+        document.getElementById("certKarat").innerText = terdaftar && karat > 0 ? `${karat}K` : "N/A";
 
         if (terdaftar && waktuDaftar > 0) {
             const date = new Date(Number(waktuDaftar) * 1000);
@@ -493,6 +516,24 @@ function updateConnectedWalletLabel() {
     if (!currentWallet) return;
 
     document.getElementById("walletLabel").innerText = `Connected: ${shortAddress(currentWallet.address)} (${getWalletRole(currentWallet)})`;
+}
+
+function validateCertificateNumbers(beratGram, karat) {
+    if (!isValidPositiveInteger(beratGram)) {
+        throw new Error("Berat gram harus berupa angka bulat lebih dari 0!");
+    }
+
+    if (!isValidKarat(karat)) {
+        throw new Error("Karat harus berupa angka bulat antara 1 sampai 24!");
+    }
+}
+
+function isValidPositiveInteger(value) {
+    return Number.isInteger(value) && value > 0;
+}
+
+function isValidKarat(value) {
+    return Number.isInteger(value) && value >= 1 && value <= 24;
 }
 
 function createDummyHash(input) {

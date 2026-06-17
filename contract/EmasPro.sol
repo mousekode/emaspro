@@ -25,6 +25,8 @@ contract VerifikasiEmasPro {
         uint256 timestamp;    // Waktu pendaftaran (Unix Epoch)
         string batchProduksi; // Kode produksi pabrik
         string ownerName;     // Nama pemilik yang tercetak di sertifikat
+        uint256 beratGram;    // Berat emas dalam gram
+        uint8 karat;          // Kadar karat emas, maksimal 24
         bool isRevoked;       // Status jika kartu ditarik/dicuri
     }
 
@@ -32,7 +34,7 @@ contract VerifikasiEmasPro {
     mapping(string => DetailEmas) private dataEmas;
 
     // 2. EVENTS: Log permanen di blockchain agar frontend/backend bisa "mendengar" histori
-    event EmasDidaftarkan(string serialNumber, string batchProduksi, string ownerName, uint256 timestamp);
+    event EmasDidaftarkan(string serialNumber, string batchProduksi, string ownerName, uint256 beratGram, uint8 karat, uint256 timestamp);
     event EmasDibatalkan(string serialNumber, uint256 timestamp);
     event PemilikSertifikatDiubah(string serialNumber, string ownerLama, string ownerBaru, uint256 timestamp);
     event ContractPaused(bool status);
@@ -154,28 +156,50 @@ contract VerifikasiEmasPro {
     // Mendaftarkan emas dengan detail tambahan (hanya bisa saat sistem aktif)
     // Overload ini dipertahankan untuk kompatibilitas jika pemilik belum diisi.
     function daftarkanEmas(string memory _serialNumber, string memory _batch) external hanyaAuthorized saatSistemAktif {
-        _daftarkanEmas(_serialNumber, _batch, "Belum Diisi");
+        _daftarkanEmas(_serialNumber, _batch, "Belum Diisi", 1, 24);
     }
 
     // Mendaftarkan emas sekaligus nama pemilik awal sertifikat
     function daftarkanEmas(string memory _serialNumber, string memory _batch, string memory _ownerName) external hanyaAuthorized saatSistemAktif {
         require(bytes(_ownerName).length > 0, "Nama pemilik wajib diisi!");
-        _daftarkanEmas(_serialNumber, _batch, _ownerName);
+        _daftarkanEmas(_serialNumber, _batch, _ownerName, 1, 24);
     }
 
-    function _daftarkanEmas(string memory _serialNumber, string memory _batch, string memory _ownerName) internal {
+    // Mendaftarkan emas dengan metadata lengkap
+    function daftarkanEmas(
+        string memory _serialNumber,
+        string memory _batch,
+        string memory _ownerName,
+        uint256 _beratGram,
+        uint8 _karat
+    ) external hanyaAuthorized saatSistemAktif {
+        require(bytes(_ownerName).length > 0, "Nama pemilik wajib diisi!");
+        _daftarkanEmas(_serialNumber, _batch, _ownerName, _beratGram, _karat);
+    }
+
+    function _daftarkanEmas(
+        string memory _serialNumber,
+        string memory _batch,
+        string memory _ownerName,
+        uint256 _beratGram,
+        uint8 _karat
+    ) internal {
         require(!dataEmas[_serialNumber].isRegistered, "Nomor seri sudah terdaftar!");
+        require(_beratGram > 0, "Berat gram harus lebih dari 0!");
+        require(_karat > 0 && _karat <= 24, "Karat harus antara 1 sampai 24!");
         
         dataEmas[_serialNumber] = DetailEmas({
             isRegistered: true,
             timestamp: block.timestamp,
             batchProduksi: _batch,
             ownerName: _ownerName,
+            beratGram: _beratGram,
+            karat: _karat,
             isRevoked: false
         });
 
         // Memancarkan sinyal (event) bahwa emas berhasil didaftarkan
-        emit EmasDidaftarkan(_serialNumber, _batch, _ownerName, block.timestamp);
+        emit EmasDidaftarkan(_serialNumber, _batch, _ownerName, _beratGram, _karat, block.timestamp);
     }
 
     // Membatalkan emas (Kasus: Kartu salah cetak, hilang, atau dicuri)
@@ -210,21 +234,23 @@ contract VerifikasiEmasPro {
         string memory pesanStatus, 
         string memory batch, 
         uint256 waktuDaftar,
-        string memory ownerName
+        string memory ownerName,
+        uint256 beratGram,
+        uint8 karat
     ) {
         DetailEmas memory emas = dataEmas[_serialNumber];
 
         // Skenario 1: Data sama sekali tidak ada
         if (!emas.isRegistered) {
-            return (false, "PALSU / TIDAK TERDAFTAR", "", 0, "");
+            return (false, "PALSU / TIDAK TERDAFTAR", "", 0, "", 0, 0);
         }
         
         // Skenario 2: Data ada, tapi statusnya dibatalkan/bermasalah
         if (emas.isRevoked) {
-            return (true, "PERINGATAN: KARTU DIBATALKAN / DILAPORKAN HILANG", emas.batchProduksi, emas.timestamp, emas.ownerName);
+            return (true, "PERINGATAN: KARTU DIBATALKAN / DILAPORKAN HILANG", emas.batchProduksi, emas.timestamp, emas.ownerName, emas.beratGram, emas.karat);
         }
 
         // Skenario 3: Data valid
-        return (true, "VALID & ASLI", emas.batchProduksi, emas.timestamp, emas.ownerName);
+        return (true, "VALID & ASLI", emas.batchProduksi, emas.timestamp, emas.ownerName, emas.beratGram, emas.karat);
     }
 }

@@ -25,6 +25,18 @@
             <input type="text" id="addOwner" placeholder="Contoh: PT Emas Nusantara"
                 class="w-full bg-[#0b0c14] border border-slate-800 focus:border-indigo-500 focus:outline-none rounded-xl px-4 py-2.5 text-sm transition text-white">
         </div>
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="text-[11px] text-slate-400 block mb-1">Berat (gram)</label>
+                <input type="number" id="addBerat" placeholder="Contoh: 10" min="1" step="1" inputmode="numeric"
+                    class="w-full bg-[#0b0c14] border border-slate-800 focus:border-indigo-500 focus:outline-none rounded-xl px-4 py-2.5 text-sm transition text-white">
+            </div>
+            <div>
+                <label class="text-[11px] text-slate-400 block mb-1">Karat</label>
+                <input type="number" id="addKarat" placeholder="24" min="1" max="24" step="1" inputmode="numeric"
+                    class="w-full bg-[#0b0c14] border border-slate-800 focus:border-indigo-500 focus:outline-none rounded-xl px-4 py-2.5 text-sm transition text-white">
+            </div>
+        </div>
 
         <button onclick="buatSertifikatEmas()"
             class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold py-2.5 rounded-xl transition duration-200 cursor-pointer shadow-md">

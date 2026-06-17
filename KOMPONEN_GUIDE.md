@@ -87,6 +87,8 @@ Form untuk membuat sertifikat emas baru, mengubah nama pemilik, dan menu revoke.
 - Input Serial Number
 - Input Batch Produksi
 - Input Nama Pemilik Awal
+- Input Berat (gram)
+- Input Karat
 - Tombol Issue Gold Certificate
 - Menu Ubah Nama Pemilik Sertifikat
 - Menu Revoke/Pembatalan
@@ -100,6 +102,12 @@ Form untuk membuat sertifikat emas baru, mengubah nama pemilik, dan menu revoke.
 - Mint, ubah pemilik, dan revoke membutuhkan wallet yang masuk `authorizedList`
 - Admin selalu authorized
 - Wallet public akan menerima error `Akses ditolak: Alamat tidak terauthorisasi!`
+
+**Aturan Angka**:
+- `Berat (gram)` harus angka bulat lebih dari 0
+- `Karat` harus angka bulat dari 1 sampai 24
+- Validasi dilakukan di frontend dan dummy contract adapter
+- Contract Solidity juga melakukan `require` untuk nilai berat dan karat
 
 ---
 
@@ -143,6 +151,8 @@ Template visual untuk menampilkan sertifikat emas yang telah diverifikasi.
 - `certSerial` - Nomor seri
 - `certStatusMsg` - Pesan status
 - `certOwner` - Nama pemilik sertifikat
+- `certBerat` - Berat emas dalam gram
+- `certKarat` - Kadar karat emas
 - `certBatch` - Batch produksi
 - `certDate` - Tanggal registry
 - `stampText` - Status badge
@@ -207,6 +217,7 @@ Fungsi lama tetap dipakai dan backward-compatible:
 - `isAuthorized(address)`
 - `daftarkanEmas(string,string)`
 - `daftarkanEmas(string,string,string)`
+- `daftarkanEmas(string,string,string,uint256,uint8)`
 - `batalkanEmas(string)`
 - `cekKeaslian(string)`
 
@@ -253,7 +264,7 @@ Menjalankan `addAuthorized()` pada dummy contract state. Hanya bisa dipanggil ol
 Menjalankan `removeAuthorized()` pada dummy contract state. Hanya bisa dipanggil oleh admin dan tidak bisa menghapus admin.
 
 ### `buatSertifikatEmas()`
-Membuat sertifikat emas baru dengan serial, batch, dan nama pemilik awal. Membutuhkan wallet yang masuk `authorizedList`.
+Membuat sertifikat emas baru dengan serial, batch, nama pemilik awal, berat gram, dan karat. Membutuhkan wallet yang masuk `authorizedList`.
 
 ### `ubahPemilikSertifikat()`
 Mengubah nama pemilik sertifikat berdasarkan serial number. Membutuhkan wallet yang masuk `authorizedList` dan sertifikat belum revoked.

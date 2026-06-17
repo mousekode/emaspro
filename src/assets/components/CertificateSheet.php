@@ -48,6 +48,10 @@
                 <div class="space-y-1">
                     <p><span class="font-medium text-slate-400 uppercase text-[9px] block">Certificate Owner</span> 
                     <span id="certOwner" class="font-semibold text-slate-800">-</span></p>
+                    <p><span class="font-medium text-slate-400 uppercase text-[9px] block">Berat Emas</span> 
+                    <span id="certBerat" class="font-semibold text-slate-800">-</span></p>
+                    <p><span class="font-medium text-slate-400 uppercase text-[9px] block">Karat</span> 
+                    <span id="certKarat" class="font-semibold text-slate-800">-</span></p>
                     <p><span class="font-medium text-slate-400 uppercase text-[9px] block">Production Batch</span> 
                     <span id="certBatch" class="font-semibold text-slate-800">-</span></p>
                     <p><span class="font-medium text-slate-400 uppercase text-[9px] block">Block Timestamp</span> 
