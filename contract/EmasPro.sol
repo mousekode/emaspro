@@ -4,6 +4,16 @@ pragma solidity ^0.8.0;
 contract VerifikasiEmasPro {
     address public admin;
     bool public isPaused; // Status darurat
+
+    // Role dibaca dari state contract:
+    // - Admin: deployer contract
+    // - AuthorizedIssuer: alamat yang masuk authorizedList
+    // - PublicVerifier: alamat publik yang hanya bisa verifikasi/read-only
+    enum Role {
+        PublicVerifier,
+        AuthorizedIssuer,
+        Admin
+    }
     
     // Authorization system untuk multiple addresses
     mapping(address => bool) public isAuthorized;
@@ -14,6 +24,7 @@ contract VerifikasiEmasPro {
         bool isRegistered;
         uint256 timestamp;    // Waktu pendaftaran (Unix Epoch)
         string batchProduksi; // Kode produksi pabrik
+        string ownerName;     // Nama pemilik yang tercetak di sertifikat
         bool isRevoked;       // Status jika kartu ditarik/dicuri
     }
 
@@ -21,8 +32,9 @@ contract VerifikasiEmasPro {
     mapping(string => DetailEmas) private dataEmas;
 
     // 2. EVENTS: Log permanen di blockchain agar frontend/backend bisa "mendengar" histori
-    event EmasDidaftarkan(string serialNumber, string batchProduksi, uint256 timestamp);
+    event EmasDidaftarkan(string serialNumber, string batchProduksi, string ownerName, uint256 timestamp);
     event EmasDibatalkan(string serialNumber, uint256 timestamp);
+    event PemilikSertifikatDiubah(string serialNumber, string ownerLama, string ownerBaru, uint256 timestamp);
     event ContractPaused(bool status);
     event AuthorizationAdded(address indexed account);
     event AuthorizationRemoved(address indexed account);
@@ -89,6 +101,50 @@ contract VerifikasiEmasPro {
         return authorizedList;
     }
 
+    // Cek apakah alamat adalah admin contract
+    function isAdmin(address _account) public view returns (bool) {
+        return _account == admin;
+    }
+
+    // Cek apakah alamat boleh membuat/revoke sertifikat
+    function canIssue(address _account) public view returns (bool) {
+        return isAuthorized[_account] || _account == admin;
+    }
+
+    // Cek apakah alamat boleh mengubah authorization
+    function canManageAuthorization(address _account) public view returns (bool) {
+        return _account == admin;
+    }
+
+    // Role numerik untuk integrasi frontend/Remix:
+    // 0 = PublicVerifier, 1 = AuthorizedIssuer, 2 = Admin
+    function getRole(address _account) public view returns (Role) {
+        if (_account == admin) {
+            return Role.Admin;
+        }
+
+        if (isAuthorized[_account]) {
+            return Role.AuthorizedIssuer;
+        }
+
+        return Role.PublicVerifier;
+    }
+
+    // Label role agar mudah dibaca dari Remix atau frontend
+    function getRoleName(address _account) external view returns (string memory) {
+        Role role = getRole(_account);
+
+        if (role == Role.Admin) {
+            return "Admin";
+        }
+
+        if (role == Role.AuthorizedIssuer) {
+            return "Authorized Issuer";
+        }
+
+        return "Public Verifier";
+    }
+
     // Fitur Keamanan: Tombol darurat jika terjadi anomali/hack pada sistem
     function togglePause() external hanyaAdmin {
         isPaused = !isPaused;
@@ -96,18 +152,30 @@ contract VerifikasiEmasPro {
     }
 
     // Mendaftarkan emas dengan detail tambahan (hanya bisa saat sistem aktif)
+    // Overload ini dipertahankan untuk kompatibilitas jika pemilik belum diisi.
     function daftarkanEmas(string memory _serialNumber, string memory _batch) external hanyaAuthorized saatSistemAktif {
+        _daftarkanEmas(_serialNumber, _batch, "Belum Diisi");
+    }
+
+    // Mendaftarkan emas sekaligus nama pemilik awal sertifikat
+    function daftarkanEmas(string memory _serialNumber, string memory _batch, string memory _ownerName) external hanyaAuthorized saatSistemAktif {
+        require(bytes(_ownerName).length > 0, "Nama pemilik wajib diisi!");
+        _daftarkanEmas(_serialNumber, _batch, _ownerName);
+    }
+
+    function _daftarkanEmas(string memory _serialNumber, string memory _batch, string memory _ownerName) internal {
         require(!dataEmas[_serialNumber].isRegistered, "Nomor seri sudah terdaftar!");
         
         dataEmas[_serialNumber] = DetailEmas({
             isRegistered: true,
             timestamp: block.timestamp,
             batchProduksi: _batch,
+            ownerName: _ownerName,
             isRevoked: false
         });
 
         // Memancarkan sinyal (event) bahwa emas berhasil didaftarkan
-        emit EmasDidaftarkan(_serialNumber, _batch, block.timestamp);
+        emit EmasDidaftarkan(_serialNumber, _batch, _ownerName, block.timestamp);
     }
 
     // Membatalkan emas (Kasus: Kartu salah cetak, hilang, atau dicuri)
@@ -120,6 +188,18 @@ contract VerifikasiEmasPro {
         emit EmasDibatalkan(_serialNumber, block.timestamp);
     }
 
+    // Mengubah nama pemilik yang tercetak pada sertifikat
+    function ubahPemilikSertifikat(string memory _serialNumber, string memory _ownerName) external hanyaAuthorized saatSistemAktif {
+        require(dataEmas[_serialNumber].isRegistered, "Nomor seri tidak ditemukan!");
+        require(!dataEmas[_serialNumber].isRevoked, "Sertifikat sudah dibatalkan!");
+        require(bytes(_ownerName).length > 0, "Nama pemilik wajib diisi!");
+
+        string memory ownerLama = dataEmas[_serialNumber].ownerName;
+        dataEmas[_serialNumber].ownerName = _ownerName;
+
+        emit PemilikSertifikatDiubah(_serialNumber, ownerLama, _ownerName, block.timestamp);
+    }
+
     // ==========================================
     // FUNGSI PUBLIK (READ-ONLY)
     // ==========================================
@@ -129,21 +209,22 @@ contract VerifikasiEmasPro {
         bool terdaftar, 
         string memory pesanStatus, 
         string memory batch, 
-        uint256 waktuDaftar
+        uint256 waktuDaftar,
+        string memory ownerName
     ) {
         DetailEmas memory emas = dataEmas[_serialNumber];
 
         // Skenario 1: Data sama sekali tidak ada
         if (!emas.isRegistered) {
-            return (false, "PALSU / TIDAK TERDAFTAR", "", 0);
+            return (false, "PALSU / TIDAK TERDAFTAR", "", 0, "");
         }
         
         // Skenario 2: Data ada, tapi statusnya dibatalkan/bermasalah
         if (emas.isRevoked) {
-            return (true, "PERINGATAN: KARTU DIBATALKAN / DILAPORKAN HILANG", emas.batchProduksi, emas.timestamp);
+            return (true, "PERINGATAN: KARTU DIBATALKAN / DILAPORKAN HILANG", emas.batchProduksi, emas.timestamp, emas.ownerName);
         }
 
         // Skenario 3: Data valid
-        return (true, "VALID & ASLI", emas.batchProduksi, emas.timestamp);
+        return (true, "VALID & ASLI", emas.batchProduksi, emas.timestamp, emas.ownerName);
     }
 }

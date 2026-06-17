@@ -3,28 +3,20 @@
 const dummyWallets = [
     {
         name: "Account 1",
-        role: "Admin",
-        address: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
-        authorized: true,
-        admin: true
+        address: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
     },
     {
         name: "Account 2",
-        role: "Authorized Factory",
-        address: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2",
-        authorized: true,
-        admin: false
+        address: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"
     },
     {
         name: "Account 3",
-        role: "Public Verifier",
-        address: "0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db",
-        authorized: false,
-        admin: false
+        address: "0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db"
     }
 ];
 
 const registryStorageKey = "goldchain_dummy_registry";
+const contractStateStorageKey = "goldchain_dummy_contract_state";
 let currentWallet = null;
 let contract = null;
 
@@ -44,7 +36,7 @@ class DummyVerifikasiEmasPro {
         this.wallet = wallet;
     }
 
-    daftarkanEmas(serialNumber, batch) {
+    daftarkanEmas(serialNumber, batch, ownerName = "Belum Diisi") {
         this.requireAuthorized();
 
         const registry = readRegistry();
@@ -56,6 +48,7 @@ class DummyVerifikasiEmasPro {
             isRegistered: true,
             timestamp: Math.floor(Date.now() / 1000),
             batchProduksi: batch,
+            ownerName,
             isRevoked: false,
             issuer: this.wallet.address
         };
@@ -85,11 +78,36 @@ class DummyVerifikasiEmasPro {
         return new DummyTransaction(createDummyHash(serialNumber));
     }
 
+    ubahPemilikSertifikat(serialNumber, ownerName) {
+        this.requireAuthorized();
+
+        if (!ownerName) {
+            throw new Error("Nama pemilik wajib diisi!");
+        }
+
+        const registry = readRegistry();
+        const record = registry[serialNumber];
+        if (!record?.isRegistered) {
+            throw new Error("Nomor seri tidak ditemukan!");
+        }
+
+        if (record.isRevoked) {
+            throw new Error("Sertifikat sudah dibatalkan!");
+        }
+
+        record.ownerName = ownerName;
+        record.ownerUpdatedBy = this.wallet.address;
+        record.ownerUpdatedAt = Math.floor(Date.now() / 1000);
+        writeRegistry(registry);
+
+        return new DummyTransaction(createDummyHash(serialNumber));
+    }
+
     cekKeaslian(serialNumber) {
         const record = readRegistry()[serialNumber];
 
         if (!record?.isRegistered) {
-            return [false, "PALSU / TIDAK TERDAFTAR", "", 0];
+            return [false, "PALSU / TIDAK TERDAFTAR", "", 0, ""];
         }
 
         if (record.isRevoked) {
@@ -97,26 +115,108 @@ class DummyVerifikasiEmasPro {
                 true,
                 "PERINGATAN: KARTU DIBATALKAN / DILAPORKAN HILANG",
                 record.batchProduksi,
-                record.timestamp
+                record.timestamp,
+                record.ownerName || "Belum Diisi"
             ];
         }
 
-        return [true, "VALID & ASLI", record.batchProduksi, record.timestamp];
+        return [true, "VALID & ASLI", record.batchProduksi, record.timestamp, record.ownerName || "Belum Diisi"];
+    }
+
+    addAuthorized(account) {
+        this.requireAdmin();
+
+        if (!account) {
+            throw new Error("Alamat tidak valid!");
+        }
+
+        const state = readContractState();
+        if (state.authorizedList.includes(account)) {
+            throw new Error("Alamat sudah terauthorisasi!");
+        }
+
+        state.authorizedList.push(account);
+        writeContractState(state);
+        return new DummyTransaction(createDummyHash(account));
+    }
+
+    removeAuthorized(account) {
+        this.requireAdmin();
+
+        const state = readContractState();
+        if (account === state.admin) {
+            throw new Error("Tidak bisa menghapus admin!");
+        }
+
+        if (!state.authorizedList.includes(account)) {
+            throw new Error("Alamat tidak terauthorisasi!");
+        }
+
+        state.authorizedList = state.authorizedList.filter((address) => address !== account);
+        writeContractState(state);
+        return new DummyTransaction(createDummyHash(account));
+    }
+
+    getAuthorizedList() {
+        return [...readContractState().authorizedList];
+    }
+
+    isAuthorized(account) {
+        return readContractState().authorizedList.includes(account);
+    }
+
+    admin() {
+        return readContractState().admin;
+    }
+
+    isAdmin(account) {
+        return account === this.admin();
+    }
+
+    canIssue(account) {
+        return this.isAuthorized(account) || this.isAdmin(account);
+    }
+
+    canManageAuthorization(account) {
+        return this.isAdmin(account);
+    }
+
+    getRole(account) {
+        if (this.isAdmin(account)) return 2;
+        if (this.isAuthorized(account)) return 1;
+        return 0;
+    }
+
+    getRoleName(account) {
+        const role = this.getRole(account);
+        if (role === 2) return "Admin";
+        if (role === 1) return "Authorized Issuer";
+        return "Public Verifier";
     }
 
     requireAuthorized() {
-        if (!this.wallet?.authorized) {
+        if (!this.wallet || !this.canIssue(this.wallet.address)) {
             throw new Error("Akses ditolak: Alamat tidak terauthorisasi!");
+        }
+    }
+
+    requireAdmin() {
+        if (!this.wallet || !this.canManageAuthorization(this.wallet.address)) {
+            throw new Error("Akses ditolak: Anda bukan Admin!");
         }
     }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+    initializeContractState();
     contract = new DummyVerifikasiEmasPro(null);
     renderDummyWallets();
+    renderAuthorizationControls();
 });
 
 function openWalletModal() {
+    renderDummyWallets();
+    renderAuthorizationControls();
     document.getElementById("walletModal").classList.remove("hidden");
 }
 
@@ -129,12 +229,15 @@ function connectWallet(index) {
     contract = new DummyVerifikasiEmasPro(currentWallet);
 
     const btn = document.getElementById("btnConnect");
+    const role = getWalletRole(currentWallet);
     btn.innerText = `${currentWallet.name} Connected`;
     btn.className = "bg-slate-800 text-slate-400 text-sm font-semibold py-2 px-5 rounded-xl border border-slate-700";
 
-    document.getElementById("walletLabel").innerText = `Connected: ${shortAddress(currentWallet.address)} (${currentWallet.role})`;
+    document.getElementById("walletLabel").innerText = `Connected: ${shortAddress(currentWallet.address)} (${role})`;
+    renderDummyWallets();
+    renderAuthorizationControls();
     closeWalletModal();
-    showToast(`Connected to ${currentWallet.name}: ${currentWallet.role}`, "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
+    showToast(`Connected to ${currentWallet.name}: ${role}`, "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
 }
 
 function renderDummyWallets() {
@@ -142,7 +245,8 @@ function renderDummyWallets() {
     if (!list) return;
 
     list.innerHTML = dummyWallets.map((wallet, index) => {
-        const badgeClass = wallet.authorized
+        const role = getWalletRole(wallet);
+        const badgeClass = role !== "Public Verifier"
             ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
             : "bg-slate-500/10 text-slate-400 border-slate-500/20";
 
@@ -155,7 +259,7 @@ function renderDummyWallets() {
                         <p class="text-xs text-slate-500 font-mono truncate mt-1">${wallet.address}</p>
                     </div>
                     <span class="shrink-0 text-[10px] border px-2 py-1 rounded-md ${badgeClass}">
-                        ${wallet.role}
+                        ${role}
                     </span>
                 </div>
             </button>
@@ -163,23 +267,83 @@ function renderDummyWallets() {
     }).join("");
 }
 
+function renderAuthorizationControls() {
+    const select = document.getElementById("authWalletSelect");
+    const status = document.getElementById("authPanelStatus");
+    if (!select || !status) return;
+
+    select.innerHTML = dummyWallets.map((wallet) => {
+        const role = getWalletRole(wallet);
+        return `<option value="${wallet.address}">${wallet.name} - ${shortAddress(wallet.address)} - ${role}</option>`;
+    }).join("");
+
+    const state = readContractState();
+    if (!currentWallet) {
+        status.innerText = `Admin is ${shortAddress(state.admin)}. Connect the admin dummy wallet to manage issuers.`;
+        return;
+    }
+
+    if (currentWallet.address !== state.admin) {
+        status.innerText = `Connected as ${getWalletRole(currentWallet)}. Only ${shortAddress(state.admin)} can change authorization.`;
+        return;
+    }
+
+    status.innerText = "Admin connected. Authorization changes are stored in the dummy contract state.";
+}
+
+async function authorizeSelectedWallet() {
+    if (!currentWallet) return alert("Hubungkan dummy wallet admin terlebih dahulu!");
+
+    const account = document.getElementById("authWalletSelect").value;
+    try {
+        const tx = contract.addAuthorized(account);
+        await tx.wait();
+        renderDummyWallets();
+        renderAuthorizationControls();
+        updateConnectedWalletLabel();
+        showToast("Alamat berhasil ditambahkan ke authorizedList dummy contract.", "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
+    } catch (error) {
+        console.error(error);
+        showToast(error.message || "Gagal menambahkan authorization.", "bg-red-500/10 text-red-400 border border-red-500/20");
+    }
+}
+
+async function removeSelectedAuthorization() {
+    if (!currentWallet) return alert("Hubungkan dummy wallet admin terlebih dahulu!");
+
+    const account = document.getElementById("authWalletSelect").value;
+    try {
+        const tx = contract.removeAuthorized(account);
+        await tx.wait();
+        renderDummyWallets();
+        renderAuthorizationControls();
+        updateConnectedWalletLabel();
+        showToast("Alamat berhasil dihapus dari authorizedList dummy contract.", "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
+    } catch (error) {
+        console.error(error);
+        showToast(error.message || "Gagal menghapus authorization.", "bg-red-500/10 text-red-400 border border-red-500/20");
+    }
+}
+
 async function buatSertifikatEmas() {
     if (!currentWallet) return alert("Hubungkan dummy wallet terlebih dahulu!");
 
     const sn = document.getElementById("addSerial").value.trim();
     const batch = document.getElementById("addBatch").value.trim();
+    const owner = document.getElementById("addOwner").value.trim();
 
-    if (!sn || !batch) return alert("Mohon lengkapi kolom Serial Number dan Batch!");
+    if (!sn || !batch || !owner) return alert("Mohon lengkapi kolom Serial Number, Batch, dan Nama Pemilik!");
 
     showToast("Memproses transaksi demo dari dummy wallet...", "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20");
     try {
-        const tx = contract.daftarkanEmas(sn, batch);
+        const tx = contract.daftarkanEmas(sn, batch, owner);
         showToast("Menulis data ke registry lokal Remix dummy...", "bg-amber-500/10 text-amber-400 border border-amber-500/20");
         await tx.wait();
         showToast("Sukses! Emas berhasil didaftarkan di registry demo.", "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
 
         document.getElementById("addSerial").value = "";
         document.getElementById("addBatch").value = "";
+        document.getElementById("addOwner").value = "";
     } catch (error) {
         console.error(error);
         showToast(error.message || "Transaksi demo gagal.", "bg-red-500/10 text-red-400 border border-red-500/20");
@@ -198,6 +362,7 @@ async function cekKeaslianEmas() {
         const pesanStatus = res[1];
         const batch = res[2];
         const waktuDaftar = res[3];
+        const ownerName = res[4];
 
         document.getElementById("placeholderView").classList.add("hidden");
         document.getElementById("certificateSheet").classList.remove("hidden");
@@ -205,6 +370,7 @@ async function cekKeaslianEmas() {
         document.getElementById("certSerial").innerText = sn;
         document.getElementById("certStatusMsg").innerText = pesanStatus;
         document.getElementById("certBatch").innerText = terdaftar ? batch : "N/A";
+        document.getElementById("certOwner").innerText = terdaftar ? ownerName : "N/A";
 
         if (terdaftar && waktuDaftar > 0) {
             const date = new Date(Number(waktuDaftar) * 1000);
@@ -232,6 +398,26 @@ async function cekKeaslianEmas() {
     } catch (error) {
         console.error(error);
         showToast("Gagal membaca data dari registry demo.", "bg-red-500/10 text-red-400 border border-red-500/20");
+    }
+}
+
+async function ubahPemilikSertifikat() {
+    if (!currentWallet) return alert("Hubungkan dummy wallet terlebih dahulu!");
+
+    const sn = document.getElementById("ownerSerial").value.trim();
+    const owner = document.getElementById("ownerName").value.trim();
+    if (!sn || !owner) return alert("Masukkan ID Serial dan nama pemilik baru!");
+
+    showToast("Mengirim perubahan nama pemilik dari dummy wallet...", "bg-amber-500/10 text-amber-400 border border-amber-500/20");
+    try {
+        const tx = contract.ubahPemilikSertifikat(sn, owner);
+        await tx.wait();
+        showToast("Sukses! Nama pemilik sertifikat berhasil diperbarui.", "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
+        document.getElementById("ownerSerial").value = "";
+        document.getElementById("ownerName").value = "";
+    } catch (error) {
+        console.error(error);
+        showToast(error.message || "Gagal mengubah nama pemilik sertifikat.", "bg-red-500/10 text-red-400 border border-red-500/20");
     }
 }
 
@@ -264,6 +450,49 @@ function readRegistry() {
 
 function writeRegistry(registry) {
     localStorage.setItem(registryStorageKey, JSON.stringify(registry));
+}
+
+function initializeContractState() {
+    if (localStorage.getItem(contractStateStorageKey)) return;
+
+    const deployer = dummyWallets[0].address;
+    writeContractState({
+        admin: deployer,
+        authorizedList: [deployer],
+        isPaused: false
+    });
+}
+
+function readContractState() {
+    try {
+        return JSON.parse(localStorage.getItem(contractStateStorageKey)) || createDefaultContractState();
+    } catch (error) {
+        console.error(error);
+        return createDefaultContractState();
+    }
+}
+
+function writeContractState(state) {
+    localStorage.setItem(contractStateStorageKey, JSON.stringify(state));
+}
+
+function createDefaultContractState() {
+    const deployer = dummyWallets[0].address;
+    return {
+        admin: deployer,
+        authorizedList: [deployer],
+        isPaused: false
+    };
+}
+
+function getWalletRole(wallet) {
+    return contract.getRoleName(wallet.address);
+}
+
+function updateConnectedWalletLabel() {
+    if (!currentWallet) return;
+
+    document.getElementById("walletLabel").innerText = `Connected: ${shortAddress(currentWallet.address)} (${getWalletRole(currentWallet)})`;
 }
 
 function createDummyHash(input) {
