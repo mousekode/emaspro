@@ -41,6 +41,7 @@ Modal untuk memilih metode koneksi wallet dan melihat role authorization contrac
 **Fitur**:
 - Connect via MetaMask SSO (`eth_requestAccounts`)
 - Connect via pasted EVM wallet address
+- Paste active contract address tanpa edit file
 - Disconnect/logout wallet
 - Panel Contract Authorization read-only untuk alamat aktif
 - Role wallet dibaca dari contract adapter, bukan hardcoded di wallet
@@ -194,13 +195,19 @@ Template visual untuk menampilkan sertifikat emas yang telah diverifikasi.
 
 **Contract Address**
 
-Alamat contract aktif berada di `src/assets/js/goldchain.js`:
+Alamat fallback berada di `src/assets/js/goldchain.js`:
 
 ```js
-const deployedContractAddress = "0x2C01D483c54842576f858B5d809a97C9c9f98B3c";
+const defaultContractAddress = "0x...";
 ```
 
-Ganti nilai tersebut jika deploy contract baru di Remix.
+Untuk mengganti contract tanpa edit file:
+
+- Buka Connect Wallet
+- Paste address contract baru ke field Contract Address
+- Klik Use
+
+Address aktif disimpan di browser `localStorage` dengan key `goldchain_contract_address`.
 
 ---
 
@@ -318,8 +325,9 @@ Menampilkan toast notification dengan pesan custom
 - Disconnect lalu connect alamat lain untuk menguji role berbeda
 
 ### Contract address salah
-- Buka `src/assets/js/goldchain.js`
-- Ubah `deployedContractAddress`
+- Buka Connect Wallet
+- Paste contract address baru
+- Klik Use
 - Pastikan MetaMask berada di network yang sama dengan contract deploy
 
 ### Metadata batch/pemilik tidak muncul

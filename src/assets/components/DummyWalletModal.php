@@ -19,6 +19,21 @@
             </div>
 
             <div class="p-5 space-y-4">
+                <div class="bg-[#0b0c14] border border-slate-800 rounded-xl p-4">
+                    <label class="text-[11px] text-slate-400 block mb-2">Contract Address</label>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <input type="text" id="contractAddressInput" placeholder="0x..."
+                            class="flex-1 min-w-0 bg-[#131524] border border-slate-800 focus:border-indigo-500 focus:outline-none rounded-xl px-3 py-2 text-xs text-white font-mono">
+                        <button onclick="saveContractAddressFromInput()"
+                            class="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-xl transition cursor-pointer">
+                            Use
+                        </button>
+                    </div>
+                    <p class="text-[10px] text-slate-500 mt-2">
+                        Current: <span id="activeContractAddress" class="font-mono text-slate-400">-</span>
+                    </p>
+                </div>
+
                 <button onclick="connectMetaMaskWallet()"
                     class="w-full text-left bg-[#0b0c14] border border-slate-800 hover:border-indigo-500 rounded-xl p-4 transition cursor-pointer">
                     <div class="flex items-center justify-between gap-4">

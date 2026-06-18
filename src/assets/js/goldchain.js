@@ -1,7 +1,8 @@
 // GoldChain Pro - deployed contract wallet integration
 
-// Update this address when you deploy a new VerifikasiEmasPro contract.
-const deployedContractAddress = "0x6818A0f5118d3CD7F8EbFBe55E4eA730D62FC4E1";
+// Default fallback. You can override it from the Connect Wallet modal.
+const defaultContractAddress = "0x6818A0f5118d3CD7F8EbFBe55E4eA730D62FC4E1";
+const contractAddressStorageKey = "goldchain_contract_address";
 
 const contractABI = [
     "function admin() view returns (address)",
@@ -28,6 +29,7 @@ let currentWallet = null;
 document.addEventListener("DOMContentLoaded", () => {
     renderAuthorizationControls();
     renderWalletConnectionState();
+    renderContractAddressState();
 
     if (window.ethereum?.on) {
         window.ethereum.on("accountsChanged", async (accounts) => {
@@ -51,6 +53,7 @@ document.addEventListener("DOMContentLoaded", () => {
 function openWalletModal() {
     renderAuthorizationControls();
     renderWalletConnectionState();
+    renderContractAddressState();
     document.getElementById("walletModal").classList.remove("hidden");
 }
 
@@ -102,6 +105,32 @@ function disconnectWallet() {
     showToast("Wallet disconnected. Anda bisa login dengan alamat lain.", "bg-slate-500/10 text-slate-300 border border-slate-500/20");
 }
 
+async function saveContractAddressFromInput() {
+    const input = document.getElementById("contractAddressInput");
+    const address = input.value.trim();
+
+    if (!isValidWalletAddress(address)) {
+        showToast("Contract address harus format EVM 0x + 40 karakter hex.", "bg-red-500/10 text-red-400 border border-red-500/20");
+        return;
+    }
+
+    localStorage.setItem(contractAddressStorageKey, normalizeWalletAddress(address));
+    input.value = "";
+    provider = null;
+    signer = null;
+    contract = null;
+
+    if (currentWallet) {
+        await setConnectedWallet(currentWallet.address, currentWallet.source, currentWallet.canSign);
+    } else {
+        await renderAuthorizationControls();
+        renderWalletConnectionState();
+    }
+
+    renderContractAddressState();
+    showToast(`Contract address aktif: ${shortAddress(getActiveContractAddress())}`, "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
+}
+
 async function setConnectedWallet(address, source, withSigner) {
     currentWallet = {
         name: source,
@@ -113,7 +142,7 @@ async function setConnectedWallet(address, source, withSigner) {
     try {
         provider = getBrowserProvider();
         signer = withSigner ? await provider.getSigner() : null;
-        contract = new ethers.Contract(deployedContractAddress, contractABI, signer || provider);
+        contract = new ethers.Contract(getActiveContractAddress(), contractABI, signer || provider);
     } catch (error) {
         console.error(error);
         contract = null;
@@ -135,13 +164,13 @@ async function renderAuthorizationControls() {
     if (!currentWallet) {
         connectedAddress.innerText = "-";
         connectedRole.innerText = "-";
-        status.innerText = `Contract: ${shortAddress(deployedContractAddress)}. Connect MetaMask or paste an address to inspect role.`;
+        status.innerText = `Contract: ${shortAddress(getActiveContractAddress())}. Connect MetaMask or paste an address to inspect role.`;
         return;
     }
 
     connectedAddress.innerText = currentWallet.address;
     connectedRole.innerText = "Checking...";
-    status.innerText = `Reading authorization from contract ${shortAddress(deployedContractAddress)}.`;
+    status.innerText = `Reading authorization from contract ${shortAddress(getActiveContractAddress())}.`;
 
     const role = await getWalletRole(currentWallet.address);
     connectedRole.innerText = role;
@@ -320,7 +349,7 @@ function getBrowserProvider() {
 
 function getReadContract() {
     const readProvider = getBrowserProvider();
-    return new ethers.Contract(deployedContractAddress, contractABI, readProvider);
+    return new ethers.Contract(getActiveContractAddress(), contractABI, readProvider);
 }
 
 function getWriteContract() {
@@ -343,6 +372,23 @@ async function getWalletRole(address) {
 function updateConnectedWalletLabel() {
     renderWalletConnectionState();
     renderAuthorizationControls();
+}
+
+function getActiveContractAddress() {
+    const savedAddress = localStorage.getItem(contractAddressStorageKey);
+    return savedAddress && isValidWalletAddress(savedAddress) ? savedAddress : defaultContractAddress;
+}
+
+function renderContractAddressState() {
+    const activeContractAddress = document.getElementById("activeContractAddress");
+    const input = document.getElementById("contractAddressInput");
+    if (activeContractAddress) {
+        activeContractAddress.innerText = shortAddress(getActiveContractAddress());
+        activeContractAddress.title = getActiveContractAddress();
+    }
+    if (input) {
+        input.placeholder = getActiveContractAddress();
+    }
 }
 
 function hashSerial(serialNumber) {
