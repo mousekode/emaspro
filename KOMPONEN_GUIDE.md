@@ -23,13 +23,13 @@ Menampilkan navbar utama dengan logo, network info, dan tombol wallet connection
 
 **Fitur**:
 - Logo GoldChain
-- Network badge (Remix Dummy)
-- Connect Dummy Wallet button yang membuka modal wallet dummy
+- Network badge (Remix / Wallet Test)
+- Connect Wallet button yang membuka modal koneksi
 
 ---
 
 ### 2. **DummyWalletModal.php**
-Modal untuk memilih akun dummy Remix dan mengelola authorization contract demo.
+Modal untuk memilih metode koneksi wallet dan melihat role authorization contract.
 
 **Lokasi**: `src/assets/components/DummyWalletModal.php`
 
@@ -39,18 +39,18 @@ Modal untuk memilih akun dummy Remix dan mengelola authorization contract demo.
 ```
 
 **Fitur**:
-- Daftar akun dummy Remix
-- Role wallet dibaca dari dummy contract state, bukan hardcoded di wallet
-- Panel Contract Authorization
-- Admin dapat menjalankan `addAuthorized` dan `removeAuthorized`
-- Authorization disimpan di `localStorage` sebagai state contract demo
+- Connect via MetaMask SSO (`eth_requestAccounts`)
+- Connect via pasted EVM wallet address
+- Disconnect/logout wallet
+- Panel Contract Authorization read-only untuk alamat aktif
+- Role wallet dibaca dari contract adapter, bukan hardcoded di wallet
 
 **Catatan Authorization**:
-- `Account 1` dianggap deployer awal, sehingga menjadi `admin`
-- Saat state pertama dibuat, hanya `admin` yang masuk `authorizedList`
-- `Account 2` dan `Account 3` menjadi issuer hanya setelah admin menekan Authorize
+- Authorization alamat diatur dari Remix/contract
+- Paste wallet digunakan untuk menguji alamat tertentu tanpa perlu switch akun MetaMask
 - Public verifier tetap bisa menjalankan query sertifikat tanpa authorization
 - Role dibaca dari contract helper: `getRole()`, `getRoleName()`, `canIssue()`, dan `canManageAuthorization()`
+- Alamat EVM dinormalisasi lowercase agar checksum/lowercase tidak merusak role check
 
 ---
 
@@ -106,13 +106,15 @@ Form untuk membuat sertifikat emas baru, mengubah nama pemilik, dan menu revoke.
 **Aturan Angka**:
 - `Berat (gram)` harus angka bulat lebih dari 0
 - `Karat` harus angka bulat dari 1 sampai 24
-- Validasi dilakukan di frontend dan dummy contract adapter
+- Validasi dilakukan di frontend dan contract
+- Batch dan nama pemilik disimpan sebagai metadata off-chain browser untuk menghemat gas
+- Contract hanya menyimpan `metadataHash`, `beratGram`, `karat`, timestamp, dan status revoke
 - Contract Solidity juga melakukan `require` untuk nilai berat dan karat
 
 ---
 
 ### 5. **CertificateVerifier.php**
-Input field untuk query dan verifikasi sertifikat dari registry dummy lokal.
+Input field untuk query dan verifikasi sertifikat dari contract registry.
 
 **Lokasi**: `src/assets/components/CertificateVerifier.php`
 
@@ -127,7 +129,7 @@ Input field untuk query dan verifikasi sertifikat dari registry dummy lokal.
 - Toast message display area
 
 **JavaScript Functions yang Digunakan**:
-- `cekKeaslianEmas()` - Query ke dummy contract registry
+- `cekKeaslianEmas()` - Query ke contract registry
 
 ---
 
@@ -144,7 +146,7 @@ Template visual untuk menampilkan sertifikat emas yang telah diverifikasi.
 **Fitur**:
 - Placeholder saat tidak ada sertifikat
 - Template visual sertifikat premium
-- Dynamic rendering berdasarkan query dummy contract registry
+- Dynamic rendering berdasarkan query contract registry
 - Status badge (VERIFIED, INVALID, REVOKED)
 
 **JavaScript Data yang Digunakan**:
@@ -168,27 +170,37 @@ Template visual untuk menampilkan sertifikat emas yang telah diverifikasi.
    ↓
 3. HomeView.php merangkai komponen:
    - Header (navbar & wallet)
-   - DummyWalletModal (wallet dummy & authorization)
+   - DummyWalletModal (MetaMask/pasted wallet & authorization status)
    - RegistryStats (info sistem)
    - MintingPanel (form minting)
    - CertificateVerifier (input query)
    - CertificateSheet (display sertifikat)
    ↓
 4. JavaScript functions di goldchain.js:
-   - openWalletModal() → buka modal dummy wallet
-   - connectWallet(index) → pilih akun dummy Remix
-   - authorizeSelectedWallet() → addAuthorized() dummy contract
-   - removeSelectedAuthorization() → removeAuthorized() dummy contract
-   - buatSertifikatEmas() → daftarkanEmas() dummy contract call
-   - ubahPemilikSertifikat() → ubahPemilikSertifikat() dummy contract call
-   - cekKeaslianEmas() → cekKeaslian() dummy contract call
-   - ubahStatusValidasi() → batalkanEmas() dummy contract call
+   - openWalletModal() → buka modal wallet
+   - connectMetaMaskWallet() → koneksi MetaMask SSO
+   - connectPastedWallet() → koneksi dari alamat pasted
+   - disconnectWallet() → logout wallet aktif
+   - buatSertifikatEmas() → daftarkanEmas() contract call
+   - ubahPemilikSertifikat() → ubahMetadataSertifikat() contract call
+   - cekKeaslianEmas() → cekKeaslian() contract call
+   - ubahStatusValidasi() → batalkanEmas() contract call
    ↓
-5. Dummy Contract State (Remix-style local mode)
+5. Deployed Contract
    - VerifikasiEmasPro access rules
-   - admin, authorizedList, role helpers, registry sertifikat
-   - Data tersimpan di browser localStorage
+   - admin, authorizedList, role helpers, registry hash sertifikat
+   - Contract address configured in `src/assets/js/goldchain.js`
 ```
+
+**Contract Address**
+
+Alamat contract aktif berada di `src/assets/js/goldchain.js`:
+
+```js
+const deployedContractAddress = "0x2C01D483c54842576f858B5d809a97C9c9f98B3c";
+```
+
+Ganti nilai tersebut jika deploy contract baru di Remix.
 
 ---
 
@@ -208,18 +220,26 @@ Helper contract yang tersedia:
 - `getRole(address)` - return enum numerik: 0 Public, 1 Authorized, 2 Admin
 - `getRoleName(address)` - return label role untuk Remix/frontend
 - `getAuthorizedList()` - return daftar issuer authorized
-- `ubahPemilikSertifikat(string,string)` - mengubah nama pemilik sertifikat
+- `ubahMetadataSertifikat(bytes32,bytes32)` - mengubah hash metadata sertifikat
 
-Fungsi lama tetap dipakai dan backward-compatible:
+Fungsi utama contract rendah gas:
 
 - `addAuthorized(address)`
 - `removeAuthorized(address)`
 - `isAuthorized(address)`
-- `daftarkanEmas(string,string)`
-- `daftarkanEmas(string,string,string)`
-- `daftarkanEmas(string,string,string,uint256,uint8)`
-- `batalkanEmas(string)`
-- `cekKeaslian(string)`
+- `daftarkanEmas(bytes32,bytes32,uint32,uint8)`
+- `batalkanEmas(bytes32)`
+- `cekKeaslian(bytes32)`
+
+**Catatan gas**
+
+Contract memakai model rendah gas:
+
+- Serial number dikirim sebagai `bytes32 serialHash`
+- Batch dan nama pemilik tidak disimpan sebagai string on-chain
+- Batch dan nama pemilik disimpan di browser `localStorage` dengan key `goldchain_certificate_metadata`
+- Contract hanya menyimpan hash metadata agar data off-chain bisa dicocokkan dengan bukti on-chain
+- Jika browser/storage berbeda, certificate preview tetap valid tetapi batch/pemilik bisa tampil sebagai metadata tidak tersedia
 
 ---
 
@@ -251,26 +271,26 @@ Template untuk membuat komponen baru:
 
 Semua functions ini global scope dan bisa dipanggil dari onclick handlers:
 
-### `connectWallet()`
-Memilih akun dummy Remix dari modal dan membuat adapter `DummyVerifikasiEmasPro`.
+### `connectMetaMaskWallet()`
+Meminta akun MetaMask via `eth_requestAccounts` dan membuat adapter wallet aktif.
+
+### `connectPastedWallet()`
+Menggunakan alamat EVM yang dipaste untuk menguji role/address tertentu.
+
+### `disconnectWallet()`
+Logout wallet aktif dan mengembalikan UI ke status belum terhubung.
 
 ### `openWalletModal()` / `closeWalletModal()`
-Membuka dan menutup modal wallet dummy.
-
-### `authorizeSelectedWallet()`
-Menjalankan `addAuthorized()` pada dummy contract state. Hanya bisa dipanggil oleh admin.
-
-### `removeSelectedAuthorization()`
-Menjalankan `removeAuthorized()` pada dummy contract state. Hanya bisa dipanggil oleh admin dan tidak bisa menghapus admin.
+Membuka dan menutup modal wallet.
 
 ### `buatSertifikatEmas()`
 Membuat sertifikat emas baru dengan serial, batch, nama pemilik awal, berat gram, dan karat. Membutuhkan wallet yang masuk `authorizedList`.
 
 ### `ubahPemilikSertifikat()`
-Mengubah nama pemilik sertifikat berdasarkan serial number. Membutuhkan wallet yang masuk `authorizedList` dan sertifikat belum revoked.
+Mengubah metadata hash sertifikat berdasarkan serial number dan menyimpan nama pemilik baru di metadata browser. Membutuhkan wallet yang masuk `authorizedList` dan sertifikat belum revoked.
 
 ### `cekKeaslianEmas()`
-Query sertifikat dari dummy contract registry dan render certificate sheet.
+Query sertifikat dari contract registry dan render certificate sheet.
 
 ### `ubahStatusValidasi()`
 Membatalkan/revoke sertifikat. Membutuhkan wallet yang masuk `authorizedList`.
@@ -292,15 +312,20 @@ Menampilkan toast notification dengan pesan custom
 - Cek browser console untuk error messages
 
 ### Wallet tidak bisa mint/revoke
-- Buka Connect Dummy Wallet
-- Connect sebagai Account 1/Admin
-- Pilih account target di Contract Authorization
-- Klik Authorize
-- Connect ulang sebagai account yang sudah authorized
+- Pastikan alamat sudah masuk `authorizedList` di Remix/contract
+- Buka Connect Wallet
+- Gunakan MetaMask atau paste alamat yang ingin dites
+- Disconnect lalu connect alamat lain untuk menguji role berbeda
 
-### Reset data dummy contract
-- Hapus key `goldchain_dummy_registry` dan `goldchain_dummy_contract_state` dari browser localStorage
-- Refresh halaman untuk membuat ulang state default
+### Contract address salah
+- Buka `src/assets/js/goldchain.js`
+- Ubah `deployedContractAddress`
+- Pastikan MetaMask berada di network yang sama dengan contract deploy
+
+### Metadata batch/pemilik tidak muncul
+- Metadata detail disimpan off-chain untuk menghemat gas
+- Gunakan browser yang sama dengan saat mint, atau input ulang metadata melalui menu update metadata
+- On-chain proof tetap dicek melalui `metadataHash`
 
 ### Styling tidak bekerja
 - Verifikasi Tailwind CSS CDN sudah loaded di Layout.php
@@ -309,5 +334,5 @@ Menampilkan toast notification dengan pesan custom
 ---
 
 **Created**: June 2026
-**Last Updated**: 2026-06-17
+**Last Updated**: 2026-06-18
 **Version**: 1.0

@@ -11,7 +11,7 @@ if (!isset($walletConnected)) {
     <h3 class="text-xs font-bold text-slate-400 tracking-wider uppercase mb-4">Registry Stats</h3>
     <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-3">
         <span class="text-sm text-slate-400">System Engine</span>
-        <span class="text-sm font-semibold text-emerald-400">VerifikasiEmasPro Dummy</span>
+        <span class="text-sm font-semibold text-emerald-400">VerifikasiEmasPro</span>
     </div>
     <div>
         <span class="text-xs text-slate-500 block truncate font-mono" id="walletLabel">

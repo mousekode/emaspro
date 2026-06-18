@@ -1,235 +1,56 @@
-// GoldChain Pro - Remix dummy wallet demo adapter
+// GoldChain Pro - deployed contract wallet integration
 
-const dummyWallets = [
-    {
-        name: "Account 1",
-        address: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
-    },
-    {
-        name: "Account 2",
-        address: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"
-    },
-    {
-        name: "Account 3",
-        address: "0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db"
-    }
+// Update this address when you deploy a new VerifikasiEmasPro contract.
+const deployedContractAddress = "0x6818A0f5118d3CD7F8EbFBe55E4eA730D62FC4E1";
+
+const contractABI = [
+    "function admin() view returns (address)",
+    "function isPaused() view returns (bool)",
+    "function isAuthorized(address) view returns (bool)",
+    "function getAuthorizedList() view returns (address[])",
+    "function isAdmin(address _account) view returns (bool)",
+    "function canIssue(address _account) view returns (bool)",
+    "function canManageAuthorization(address _account) view returns (bool)",
+    "function getRole(address _account) view returns (uint8)",
+    "function getRoleName(address _account) view returns (string)",
+    "function daftarkanEmas(bytes32 _serialHash, bytes32 _metadataHash, uint32 _beratGram, uint8 _karat)",
+    "function ubahMetadataSertifikat(bytes32 _serialHash, bytes32 _metadataHash)",
+    "function batalkanEmas(bytes32 _serialHash)",
+    "function cekKeaslian(bytes32 _serialHash) view returns (bool terdaftar, string pesanStatus, uint40 waktuDaftar, bytes32 metadataHash, uint32 beratGram, uint8 karat)"
 ];
 
-const registryStorageKey = "goldchain_dummy_registry";
-const contractStateStorageKey = "goldchain_dummy_contract_state";
-let currentWallet = null;
+const certificateMetadataStorageKey = "goldchain_certificate_metadata";
+let provider = null;
+let signer = null;
 let contract = null;
-
-class DummyTransaction {
-    constructor(hash) {
-        this.hash = hash;
-    }
-
-    async wait() {
-        await new Promise((resolve) => setTimeout(resolve, 350));
-        return { status: 1, transactionHash: this.hash };
-    }
-}
-
-class DummyVerifikasiEmasPro {
-    constructor(wallet) {
-        this.wallet = wallet;
-    }
-
-    daftarkanEmas(serialNumber, batch, ownerName = "Belum Diisi", beratGram = 1, karat = 24) {
-        this.requireAuthorized();
-        validateCertificateNumbers(beratGram, karat);
-
-        const registry = readRegistry();
-        if (registry[serialNumber]?.isRegistered) {
-            throw new Error("Nomor seri sudah terdaftar!");
-        }
-
-        registry[serialNumber] = {
-            isRegistered: true,
-            timestamp: Math.floor(Date.now() / 1000),
-            batchProduksi: batch,
-            ownerName,
-            beratGram,
-            karat,
-            isRevoked: false,
-            issuer: this.wallet.address
-        };
-
-        writeRegistry(registry);
-        return new DummyTransaction(createDummyHash(serialNumber));
-    }
-
-    batalkanEmas(serialNumber) {
-        this.requireAuthorized();
-
-        const registry = readRegistry();
-        const record = registry[serialNumber];
-        if (!record?.isRegistered) {
-            throw new Error("Nomor seri tidak ditemukan!");
-        }
-
-        if (record.isRevoked) {
-            throw new Error("Emas sudah dibatalkan sebelumnya!");
-        }
-
-        record.isRevoked = true;
-        record.revokedBy = this.wallet.address;
-        record.revokedAt = Math.floor(Date.now() / 1000);
-        writeRegistry(registry);
-
-        return new DummyTransaction(createDummyHash(serialNumber));
-    }
-
-    ubahPemilikSertifikat(serialNumber, ownerName) {
-        this.requireAuthorized();
-
-        if (!ownerName) {
-            throw new Error("Nama pemilik wajib diisi!");
-        }
-
-        const registry = readRegistry();
-        const record = registry[serialNumber];
-        if (!record?.isRegistered) {
-            throw new Error("Nomor seri tidak ditemukan!");
-        }
-
-        if (record.isRevoked) {
-            throw new Error("Sertifikat sudah dibatalkan!");
-        }
-
-        record.ownerName = ownerName;
-        record.ownerUpdatedBy = this.wallet.address;
-        record.ownerUpdatedAt = Math.floor(Date.now() / 1000);
-        writeRegistry(registry);
-
-        return new DummyTransaction(createDummyHash(serialNumber));
-    }
-
-    cekKeaslian(serialNumber) {
-        const record = readRegistry()[serialNumber];
-
-        if (!record?.isRegistered) {
-            return [false, "PALSU / TIDAK TERDAFTAR", "", 0, "", 0, 0];
-        }
-
-        if (record.isRevoked) {
-            return [
-                true,
-                "PERINGATAN: KARTU DIBATALKAN / DILAPORKAN HILANG",
-                record.batchProduksi,
-                record.timestamp,
-                record.ownerName || "Belum Diisi",
-                record.beratGram || 0,
-                record.karat || 0
-            ];
-        }
-
-        return [
-            true,
-            "VALID & ASLI",
-            record.batchProduksi,
-            record.timestamp,
-            record.ownerName || "Belum Diisi",
-            record.beratGram || 0,
-            record.karat || 0
-        ];
-    }
-
-    addAuthorized(account) {
-        this.requireAdmin();
-
-        if (!account) {
-            throw new Error("Alamat tidak valid!");
-        }
-
-        const state = readContractState();
-        if (state.authorizedList.includes(account)) {
-            throw new Error("Alamat sudah terauthorisasi!");
-        }
-
-        state.authorizedList.push(account);
-        writeContractState(state);
-        return new DummyTransaction(createDummyHash(account));
-    }
-
-    removeAuthorized(account) {
-        this.requireAdmin();
-
-        const state = readContractState();
-        if (account === state.admin) {
-            throw new Error("Tidak bisa menghapus admin!");
-        }
-
-        if (!state.authorizedList.includes(account)) {
-            throw new Error("Alamat tidak terauthorisasi!");
-        }
-
-        state.authorizedList = state.authorizedList.filter((address) => address !== account);
-        writeContractState(state);
-        return new DummyTransaction(createDummyHash(account));
-    }
-
-    getAuthorizedList() {
-        return [...readContractState().authorizedList];
-    }
-
-    isAuthorized(account) {
-        return readContractState().authorizedList.includes(account);
-    }
-
-    admin() {
-        return readContractState().admin;
-    }
-
-    isAdmin(account) {
-        return account === this.admin();
-    }
-
-    canIssue(account) {
-        return this.isAuthorized(account) || this.isAdmin(account);
-    }
-
-    canManageAuthorization(account) {
-        return this.isAdmin(account);
-    }
-
-    getRole(account) {
-        if (this.isAdmin(account)) return 2;
-        if (this.isAuthorized(account)) return 1;
-        return 0;
-    }
-
-    getRoleName(account) {
-        const role = this.getRole(account);
-        if (role === 2) return "Admin";
-        if (role === 1) return "Authorized Issuer";
-        return "Public Verifier";
-    }
-
-    requireAuthorized() {
-        if (!this.wallet || !this.canIssue(this.wallet.address)) {
-            throw new Error("Akses ditolak: Alamat tidak terauthorisasi!");
-        }
-    }
-
-    requireAdmin() {
-        if (!this.wallet || !this.canManageAuthorization(this.wallet.address)) {
-            throw new Error("Akses ditolak: Anda bukan Admin!");
-        }
-    }
-}
+let currentWallet = null;
 
 document.addEventListener("DOMContentLoaded", () => {
-    initializeContractState();
-    contract = new DummyVerifikasiEmasPro(null);
-    renderDummyWallets();
     renderAuthorizationControls();
+    renderWalletConnectionState();
+
+    if (window.ethereum?.on) {
+        window.ethereum.on("accountsChanged", async (accounts) => {
+            if (currentWallet?.source !== "MetaMask") return;
+
+            if (!accounts.length) {
+                disconnectWallet();
+                return;
+            }
+
+            await setConnectedWallet(accounts[0], "MetaMask", true);
+        });
+
+        window.ethereum.on("chainChanged", () => {
+            disconnectWallet();
+            showToast("Network berubah. Connect ulang wallet untuk memuat contract di network baru.", "bg-amber-500/10 text-amber-400 border border-amber-500/20");
+        });
+    }
 });
 
 function openWalletModal() {
-    renderDummyWallets();
     renderAuthorizationControls();
+    renderWalletConnectionState();
     document.getElementById("walletModal").classList.remove("hidden");
 }
 
@@ -237,109 +58,126 @@ function closeWalletModal() {
     document.getElementById("walletModal").classList.add("hidden");
 }
 
-function connectWallet(index) {
-    currentWallet = dummyWallets[index];
-    contract = new DummyVerifikasiEmasPro(currentWallet);
+async function connectMetaMaskWallet() {
+    if (!hasEthereumProvider()) {
+        showToast("MetaMask tidak ditemukan. Gunakan browser dengan MetaMask untuk contract live.", "bg-red-500/10 text-red-400 border border-red-500/20");
+        return;
+    }
 
-    const btn = document.getElementById("btnConnect");
-    const role = getWalletRole(currentWallet);
-    btn.innerText = `${currentWallet.name} Connected`;
-    btn.className = "bg-slate-800 text-slate-400 text-sm font-semibold py-2 px-5 rounded-xl border border-slate-700";
+    try {
+        const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+        if (!accounts?.length) {
+            showToast("Tidak ada akun MetaMask yang dipilih.", "bg-red-500/10 text-red-400 border border-red-500/20");
+            return;
+        }
 
-    document.getElementById("walletLabel").innerText = `Connected: ${shortAddress(currentWallet.address)} (${role})`;
-    renderDummyWallets();
-    renderAuthorizationControls();
+        await setConnectedWallet(accounts[0], "MetaMask", true);
+        closeWalletModal();
+    } catch (error) {
+        console.error(error);
+        showToast("Koneksi MetaMask dibatalkan atau gagal.", "bg-red-500/10 text-red-400 border border-red-500/20");
+    }
+}
+
+async function connectPastedWallet() {
+    const input = document.getElementById("pastedWalletAddress");
+    const address = input.value.trim();
+
+    if (!isValidWalletAddress(address)) {
+        showToast("Alamat wallet harus format EVM 0x + 40 karakter hex.", "bg-red-500/10 text-red-400 border border-red-500/20");
+        return;
+    }
+
+    await setConnectedWallet(address, "Pasted Wallet", false);
+    input.value = "";
     closeWalletModal();
-    showToast(`Connected to ${currentWallet.name}: ${role}`, "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
 }
 
-function renderDummyWallets() {
-    const list = document.getElementById("dummyWalletList");
-    if (!list) return;
-
-    list.innerHTML = dummyWallets.map((wallet, index) => {
-        const role = getWalletRole(wallet);
-        const badgeClass = role !== "Public Verifier"
-            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-            : "bg-slate-500/10 text-slate-400 border-slate-500/20";
-
-        return `
-            <button onclick="connectWallet(${index})"
-                class="w-full text-left bg-[#0b0c14] border border-slate-800 hover:border-indigo-500 rounded-xl p-4 transition cursor-pointer">
-                <div class="flex items-start justify-between gap-4">
-                    <div class="min-w-0">
-                        <p class="text-sm font-semibold text-white">${wallet.name}</p>
-                        <p class="text-xs text-slate-500 font-mono truncate mt-1">${wallet.address}</p>
-                    </div>
-                    <span class="shrink-0 text-[10px] border px-2 py-1 rounded-md ${badgeClass}">
-                        ${role}
-                    </span>
-                </div>
-            </button>
-        `;
-    }).join("");
+function disconnectWallet() {
+    currentWallet = null;
+    signer = null;
+    contract = null;
+    renderAuthorizationControls();
+    renderWalletConnectionState();
+    showToast("Wallet disconnected. Anda bisa login dengan alamat lain.", "bg-slate-500/10 text-slate-300 border border-slate-500/20");
 }
 
-function renderAuthorizationControls() {
-    const select = document.getElementById("authWalletSelect");
+async function setConnectedWallet(address, source, withSigner) {
+    currentWallet = {
+        name: source,
+        source,
+        address: normalizeWalletAddress(address),
+        canSign: withSigner
+    };
+
+    try {
+        provider = getBrowserProvider();
+        signer = withSigner ? await provider.getSigner() : null;
+        contract = new ethers.Contract(deployedContractAddress, contractABI, signer || provider);
+    } catch (error) {
+        console.error(error);
+        contract = null;
+    }
+
+    await renderAuthorizationControls();
+    await renderWalletConnectionState();
+
+    const role = await getWalletRole(currentWallet.address);
+    showToast(`Connected via ${source}: ${shortAddress(currentWallet.address)} (${role})`, "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
+}
+
+async function renderAuthorizationControls() {
     const status = document.getElementById("authPanelStatus");
-    if (!select || !status) return;
+    const connectedAddress = document.getElementById("authConnectedAddress");
+    const connectedRole = document.getElementById("authConnectedRole");
+    if (!status || !connectedAddress || !connectedRole) return;
 
-    select.innerHTML = dummyWallets.map((wallet) => {
-        const role = getWalletRole(wallet);
-        return `<option value="${wallet.address}">${wallet.name} - ${shortAddress(wallet.address)} - ${role}</option>`;
-    }).join("");
-
-    const state = readContractState();
     if (!currentWallet) {
-        status.innerText = `Admin is ${shortAddress(state.admin)}. Connect the admin dummy wallet to manage issuers.`;
+        connectedAddress.innerText = "-";
+        connectedRole.innerText = "-";
+        status.innerText = `Contract: ${shortAddress(deployedContractAddress)}. Connect MetaMask or paste an address to inspect role.`;
         return;
     }
 
-    if (currentWallet.address !== state.admin) {
-        status.innerText = `Connected as ${getWalletRole(currentWallet)}. Only ${shortAddress(state.admin)} can change authorization.`;
+    connectedAddress.innerText = currentWallet.address;
+    connectedRole.innerText = "Checking...";
+    status.innerText = `Reading authorization from contract ${shortAddress(deployedContractAddress)}.`;
+
+    const role = await getWalletRole(currentWallet.address);
+    connectedRole.innerText = role;
+
+    if (currentWallet.source === "Pasted Wallet") {
+        status.innerText = "Pasted wallet is for role inspection only. Use MetaMask to sign mint/revoke/update transactions.";
         return;
     }
 
-    status.innerText = "Admin connected. Authorization changes are stored in the dummy contract state.";
+    status.innerText = "MetaMask connected. Transactions will be signed by the connected wallet.";
 }
 
-async function authorizeSelectedWallet() {
-    if (!currentWallet) return alert("Hubungkan dummy wallet admin terlebih dahulu!");
+async function renderWalletConnectionState() {
+    const btn = document.getElementById("btnConnect");
+    const walletLabel = document.getElementById("walletLabel");
+    const disconnectButton = document.getElementById("btnDisconnectWallet");
+    if (!btn || !walletLabel) return;
 
-    const account = document.getElementById("authWalletSelect").value;
-    try {
-        const tx = contract.addAuthorized(account);
-        await tx.wait();
-        renderDummyWallets();
-        renderAuthorizationControls();
-        updateConnectedWalletLabel();
-        showToast("Alamat berhasil ditambahkan ke authorizedList dummy contract.", "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
-    } catch (error) {
-        console.error(error);
-        showToast(error.message || "Gagal menambahkan authorization.", "bg-red-500/10 text-red-400 border border-red-500/20");
+    if (!currentWallet) {
+        btn.innerText = "Connect Wallet";
+        btn.className = "bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold py-2 px-5 rounded-xl transition duration-200 cursor-pointer shadow-lg shadow-indigo-600/20";
+        walletLabel.innerText = "Wallet Not Connected";
+        disconnectButton?.classList.add("hidden");
+        return;
     }
-}
 
-async function removeSelectedAuthorization() {
-    if (!currentWallet) return alert("Hubungkan dummy wallet admin terlebih dahulu!");
-
-    const account = document.getElementById("authWalletSelect").value;
-    try {
-        const tx = contract.removeAuthorized(account);
-        await tx.wait();
-        renderDummyWallets();
-        renderAuthorizationControls();
-        updateConnectedWalletLabel();
-        showToast("Alamat berhasil dihapus dari authorizedList dummy contract.", "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
-    } catch (error) {
-        console.error(error);
-        showToast(error.message || "Gagal menghapus authorization.", "bg-red-500/10 text-red-400 border border-red-500/20");
-    }
+    const role = await getWalletRole(currentWallet.address);
+    btn.innerText = `${shortAddress(currentWallet.address)} Connected`;
+    btn.className = "bg-slate-800 text-slate-400 text-sm font-semibold py-2 px-5 rounded-xl border border-slate-700";
+    walletLabel.innerText = `Connected: ${shortAddress(currentWallet.address)} (${role})`;
+    disconnectButton?.classList.remove("hidden");
 }
 
 async function buatSertifikatEmas() {
-    if (!currentWallet) return alert("Hubungkan dummy wallet terlebih dahulu!");
+    if (!currentWallet) return alert("Hubungkan wallet terlebih dahulu!");
+    if (!currentWallet.canSign) return alert("Gunakan MetaMask untuk menandatangani transaksi mint.");
 
     const sn = document.getElementById("addSerial").value.trim();
     const batch = document.getElementById("addBatch").value.trim();
@@ -351,12 +189,15 @@ async function buatSertifikatEmas() {
     if (!isValidPositiveInteger(beratGram)) return alert("Berat gram harus berupa angka bulat lebih dari 0!");
     if (!isValidKarat(karat)) return alert("Karat harus berupa angka bulat antara 1 sampai 24!");
 
-    showToast("Memproses transaksi demo dari dummy wallet...", "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20");
+    showToast("Memproses persetujuan transaksi di MetaMask...", "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20");
     try {
-        const tx = contract.daftarkanEmas(sn, batch, owner, beratGram, karat);
-        showToast("Menulis data ke registry lokal Remix dummy...", "bg-amber-500/10 text-amber-400 border border-amber-500/20");
+        const serialHash = hashSerial(sn);
+        const metadataHash = hashCertificateMetadata(batch, owner);
+        const tx = await getWriteContract().daftarkanEmas(serialHash, metadataHash, beratGram, karat);
+        showToast("Menulis transaksi ke contract...", "bg-amber-500/10 text-amber-400 border border-amber-500/20");
         await tx.wait();
-        showToast("Sukses! Emas berhasil didaftarkan di registry demo.", "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
+        saveCertificateMetadata(sn, batch, owner, metadataHash);
+        showToast("Sukses! Emas berhasil didaftarkan di contract.", "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
 
         document.getElementById("addSerial").value = "";
         document.getElementById("addBatch").value = "";
@@ -365,7 +206,7 @@ async function buatSertifikatEmas() {
         document.getElementById("addKarat").value = "";
     } catch (error) {
         console.error(error);
-        showToast(error.message || "Transaksi demo gagal.", "bg-red-500/10 text-red-400 border border-red-500/20");
+        showToast(getReadableError(error, "Transaksi mint gagal."), "bg-red-500/10 text-red-400 border border-red-500/20");
     }
 }
 
@@ -373,30 +214,30 @@ async function cekKeaslianEmas() {
     const sn = document.getElementById("querySerial").value.trim();
     if (!sn) return alert("Masukkan Nomor Seri Emas!");
 
-    showToast("Mencari data di registry lokal Remix dummy...", "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20");
+    showToast("Membaca data dari contract...", "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20");
 
     try {
-        const res = contract.cekKeaslian(sn);
+        const res = await getReadContract().cekKeaslian(hashSerial(sn));
         const terdaftar = res[0];
         const pesanStatus = res[1];
-        const batch = res[2];
-        const waktuDaftar = res[3];
-        const ownerName = res[4];
-        const beratGram = res[5];
-        const karat = res[6];
+        const waktuDaftar = Number(res[2]);
+        const metadataHash = res[3];
+        const beratGram = Number(res[4]);
+        const karat = Number(res[5]);
+        const metadata = getCertificateMetadata(sn, metadataHash);
 
         document.getElementById("placeholderView").classList.add("hidden");
         document.getElementById("certificateSheet").classList.remove("hidden");
 
         document.getElementById("certSerial").innerText = sn;
         document.getElementById("certStatusMsg").innerText = pesanStatus;
-        document.getElementById("certBatch").innerText = terdaftar ? batch : "N/A";
-        document.getElementById("certOwner").innerText = terdaftar ? ownerName : "N/A";
+        document.getElementById("certBatch").innerText = terdaftar ? metadata.batch : "N/A";
+        document.getElementById("certOwner").innerText = terdaftar ? metadata.owner : "N/A";
         document.getElementById("certBerat").innerText = terdaftar && beratGram > 0 ? `${beratGram} gram` : "N/A";
         document.getElementById("certKarat").innerText = terdaftar && karat > 0 ? `${karat}K` : "N/A";
 
         if (terdaftar && waktuDaftar > 0) {
-            const date = new Date(Number(waktuDaftar) * 1000);
+            const date = new Date(waktuDaftar * 1000);
             document.getElementById("certDate").innerText = date.toLocaleString("id-ID") + " WITA";
         } else {
             document.getElementById("certDate").innerText = "N/A";
@@ -420,102 +261,131 @@ async function cekKeaslianEmas() {
         }
     } catch (error) {
         console.error(error);
-        showToast("Gagal membaca data dari registry demo.", "bg-red-500/10 text-red-400 border border-red-500/20");
+        showToast(getReadableError(error, "Gagal membaca data dari contract."), "bg-red-500/10 text-red-400 border border-red-500/20");
     }
 }
 
 async function ubahPemilikSertifikat() {
-    if (!currentWallet) return alert("Hubungkan dummy wallet terlebih dahulu!");
+    if (!currentWallet) return alert("Hubungkan wallet terlebih dahulu!");
+    if (!currentWallet.canSign) return alert("Gunakan MetaMask untuk menandatangani transaksi ubah pemilik.");
 
     const sn = document.getElementById("ownerSerial").value.trim();
     const owner = document.getElementById("ownerName").value.trim();
     if (!sn || !owner) return alert("Masukkan ID Serial dan nama pemilik baru!");
 
-    showToast("Mengirim perubahan nama pemilik dari dummy wallet...", "bg-amber-500/10 text-amber-400 border border-amber-500/20");
+    showToast("Memproses perubahan nama pemilik di MetaMask...", "bg-amber-500/10 text-amber-400 border border-amber-500/20");
     try {
-        const tx = contract.ubahPemilikSertifikat(sn, owner);
+        const serialHash = hashSerial(sn);
+        const existingMetadata = getCertificateMetadata(sn);
+        const batch = existingMetadata.batch === "Metadata off-chain tidak tersedia" ? "" : existingMetadata.batch;
+        const metadataHash = hashCertificateMetadata(batch, owner);
+        const tx = await getWriteContract().ubahMetadataSertifikat(serialHash, metadataHash);
         await tx.wait();
+        saveCertificateMetadata(sn, batch, owner, metadataHash);
         showToast("Sukses! Nama pemilik sertifikat berhasil diperbarui.", "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
         document.getElementById("ownerSerial").value = "";
         document.getElementById("ownerName").value = "";
     } catch (error) {
         console.error(error);
-        showToast(error.message || "Gagal mengubah nama pemilik sertifikat.", "bg-red-500/10 text-red-400 border border-red-500/20");
+        showToast(getReadableError(error, "Gagal mengubah nama pemilik sertifikat."), "bg-red-500/10 text-red-400 border border-red-500/20");
     }
 }
 
 async function ubahStatusValidasi() {
-    if (!currentWallet) return alert("Hubungkan dummy wallet terlebih dahulu!");
+    if (!currentWallet) return alert("Hubungkan wallet terlebih dahulu!");
+    if (!currentWallet.canSign) return alert("Gunakan MetaMask untuk menandatangani transaksi revoke.");
 
     const sn = document.getElementById("statusSerial").value.trim();
     if (!sn) return alert("Masukkan ID Serial!");
 
-    showToast("Mengirim perintah pembatalan dari dummy wallet...", "bg-amber-500/10 text-amber-400 border border-amber-500/20");
+    showToast("Memproses pembatalan sertifikat di MetaMask...", "bg-amber-500/10 text-amber-400 border border-amber-500/20");
     try {
-        const tx = contract.batalkanEmas(sn);
+        const tx = await getWriteContract().batalkanEmas(hashSerial(sn));
         await tx.wait();
         showToast("Sukses! Status emas berhasil dibatalkan (Revoked).", "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20");
         document.getElementById("statusSerial").value = "";
     } catch (error) {
         console.error(error);
-        showToast(error.message || "Gagal membatalkan sertifikat.", "bg-red-500/10 text-red-400 border border-red-500/20");
+        showToast(getReadableError(error, "Gagal membatalkan sertifikat."), "bg-red-500/10 text-red-400 border border-red-500/20");
     }
 }
 
-function readRegistry() {
+function getBrowserProvider() {
+    if (!hasEthereumProvider()) {
+        throw new Error("MetaMask/browser EVM provider tidak tersedia.");
+    }
+
+    return provider || new ethers.BrowserProvider(window.ethereum);
+}
+
+function getReadContract() {
+    const readProvider = getBrowserProvider();
+    return new ethers.Contract(deployedContractAddress, contractABI, readProvider);
+}
+
+function getWriteContract() {
+    if (!signer || !contract) {
+        throw new Error("Wallet signer belum tersedia. Connect MetaMask terlebih dahulu.");
+    }
+
+    return contract;
+}
+
+async function getWalletRole(address) {
     try {
-        return JSON.parse(localStorage.getItem(registryStorageKey)) || {};
+        return await getReadContract().getRoleName(address);
+    } catch (error) {
+        console.error(error);
+        return "Unknown";
+    }
+}
+
+function updateConnectedWalletLabel() {
+    renderWalletConnectionState();
+    renderAuthorizationControls();
+}
+
+function hashSerial(serialNumber) {
+    return ethers.keccak256(ethers.toUtf8Bytes(serialNumber.trim()));
+}
+
+function hashCertificateMetadata(batch, owner) {
+    return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+        ["string", "string"],
+        [batch, owner]
+    ));
+}
+
+function saveCertificateMetadata(serialNumber, batch, owner, metadataHash) {
+    const metadata = readCertificateMetadata();
+    metadata[hashSerial(serialNumber)] = {
+        batch,
+        owner,
+        metadataHash
+    };
+    localStorage.setItem(certificateMetadataStorageKey, JSON.stringify(metadata));
+}
+
+function getCertificateMetadata(serialNumber, expectedHash = null) {
+    const metadata = readCertificateMetadata()[hashSerial(serialNumber)];
+
+    if (metadata && (!expectedHash || metadata.metadataHash.toLowerCase() === String(expectedHash).toLowerCase())) {
+        return metadata;
+    }
+
+    return {
+        batch: "Metadata off-chain tidak tersedia",
+        owner: "Metadata off-chain tidak tersedia"
+    };
+}
+
+function readCertificateMetadata() {
+    try {
+        return JSON.parse(localStorage.getItem(certificateMetadataStorageKey)) || {};
     } catch (error) {
         console.error(error);
         return {};
     }
-}
-
-function writeRegistry(registry) {
-    localStorage.setItem(registryStorageKey, JSON.stringify(registry));
-}
-
-function initializeContractState() {
-    if (localStorage.getItem(contractStateStorageKey)) return;
-
-    const deployer = dummyWallets[0].address;
-    writeContractState({
-        admin: deployer,
-        authorizedList: [deployer],
-        isPaused: false
-    });
-}
-
-function readContractState() {
-    try {
-        return JSON.parse(localStorage.getItem(contractStateStorageKey)) || createDefaultContractState();
-    } catch (error) {
-        console.error(error);
-        return createDefaultContractState();
-    }
-}
-
-function writeContractState(state) {
-    localStorage.setItem(contractStateStorageKey, JSON.stringify(state));
-}
-
-function createDefaultContractState() {
-    const deployer = dummyWallets[0].address;
-    return {
-        admin: deployer,
-        authorizedList: [deployer],
-        isPaused: false
-    };
-}
-
-function getWalletRole(wallet) {
-    return contract.getRoleName(wallet.address);
-}
-
-function updateConnectedWalletLabel() {
-    if (!currentWallet) return;
-
-    document.getElementById("walletLabel").innerText = `Connected: ${shortAddress(currentWallet.address)} (${getWalletRole(currentWallet)})`;
 }
 
 function validateCertificateNumbers(beratGram, karat) {
@@ -536,20 +406,24 @@ function isValidKarat(value) {
     return Number.isInteger(value) && value >= 1 && value <= 24;
 }
 
-function createDummyHash(input) {
-    const payload = `${input}:${Date.now()}:${Math.random()}`;
-    let hash = 0;
+function isValidWalletAddress(address) {
+    return /^0x[a-fA-F0-9]{40}$/.test(address);
+}
 
-    for (let i = 0; i < payload.length; i++) {
-        hash = ((hash << 5) - hash) + payload.charCodeAt(i);
-        hash |= 0;
-    }
+function normalizeWalletAddress(address) {
+    return String(address || "").trim().toLowerCase();
+}
 
-    return `0x${Math.abs(hash).toString(16).padStart(64, "0")}`;
+function hasEthereumProvider() {
+    return typeof window.ethereum !== "undefined" && typeof ethers !== "undefined";
 }
 
 function shortAddress(address) {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+function getReadableError(error, fallback) {
+    return error?.reason || error?.shortMessage || error?.info?.error?.message || error?.message || fallback;
 }
 
 function showToast(msg, classes) {

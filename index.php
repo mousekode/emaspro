@@ -9,7 +9,7 @@ require_once 'helper/renderComponent.php';
 $routes = [
     '/'                 => 'src/views/HomeView.php',
     '/home'             => 'src/views/HomeView.php',
-    '/Check Certificate'=> 'src/views/CertificateView.php',
+    '/certificate-review'=> 'src/views/CertificateView.php',
 ];
 
 // Resolve the current page and normalized route (for Navbar, breadcrumbs, etc.)

@@ -5,7 +5,7 @@
 <div class="bg-[#131524] border border-slate-800 p-6 rounded-2xl shadow-xl">
     <h2 class="text-xl font-bold text-white mb-2">Verify Authenticity</h2>
     <p class="text-sm text-slate-400 mb-6">
-        Masukkan nomor seri emas untuk memvalidasi data sertifikat dari registry dummy lokal.
+        Masukkan nomor seri emas untuk memvalidasi data sertifikat dari contract registry.
     </p>
 
     <div class="flex gap-3">
